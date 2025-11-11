@@ -1,9 +1,10 @@
 // =====================================================================
-// mode2_oil_refrig.js: 模式二 (制冷热泵) 模块 - (喷油预测版 v2.0)
-// 版本: v2.0
+// mode2_oil_refrig.js: 模式二 (制冷热泵) 模块 - (喷油预测版 v2.1)
+// 版本: v2.1
 // 职责: 1. 初始化模式二的 UI 事件
 //        2. 执行模式二 (估算) 的计算 (基于 η_s, η_v 和 T_2a)
-//        3. 处理打印
+//        3. 添加输入校验 (T_2a > T_c, subcooling >= 0)
+//        4. 处理打印
 // =====================================================================
 
 import { updateFluidInfo } from './coolprop_loader.js';
@@ -16,7 +17,7 @@ let lastMode2ResultText = null;
 let calcButtonM2, resultsDivM2, calcFormM2, printButtonM2;
 let fluidSelectM2, fluidInfoDivM2;
 let allInputsM2;
-let tempDischargeActualM2; // v2.0: 新增 T2a 输入
+let tempDischargeActualM2; 
 
 // =====================================================================
 // 模式二 (制冷热泵) 专用函数
@@ -47,7 +48,7 @@ function setButtonFresh2() {
 }
 
 /**
- * 模式二 (制冷热泵) 主计算函数 (喷油预测版 v2.0)
+ * 模式二 (制冷热泵) 主计算函数 (喷油预测版 v2.1)
  */
 function calculateMode2() {
     try {
@@ -56,12 +57,12 @@ function calculateMode2() {
         
         // 工况
         const Te_C = parseFloat(document.getElementById('temp_evap_m2').value);
-        const Tc_C = parseFloat(document.getElementById('temp_cond_m2').value);
+        const Tc_C = parseFloat(document.getElementById('temp_cond_m2').value); // v2.1: 标签已修正, 这是 T_c
         const superheat_K = parseFloat(document.getElementById('superheat_m2').value);
         const subcooling_K = parseFloat(document.getElementById('subcooling_m2').value);
         
         // v2.0: 喷油效果 (关键输入)
-        const T_2a_actual_C = parseFloat(tempDischargeActualM2.value);
+        const T_2a_actual_C = parseFloat(tempDischargeActualM2.value); // 这是 T_2a
 
         // 压缩机
         const flow_mode = document.querySelector('input[name="flow_mode_m2"]:checked').value;
@@ -72,12 +73,25 @@ function calculateMode2() {
         const eta_s_input = parseFloat(document.getElementById('eta_s_m2').value); // η_s 或 η_total
         const motor_eff = parseFloat(document.getElementById('motor_eff_m2').value);
         
-        // 校验 (基础)
-        if (isNaN(Te_C) || isNaN(Tc_C) || isNaN(superheat_K) || isNaN(subcooling_K)) {
-            throw new Error("热力学工况参数包含无效数字。");
+        // --- (v2.1) 关键输入校验 ---
+        if (isNaN(Tc_C) || isNaN(T_2a_actual_C)) {
+            throw new Error("温度参数包含无效数字。");
         }
-        if (isNaN(T_2a_actual_C)) { // v2.0 校验
-            throw new Error("“预估的实际排气温度 T2a” 必须是有效数字。");
+        if (T_2a_actual_C <= Tc_C) {
+            throw new Error(
+                `[物理逻辑错误]\n预估的实际排气温度 T2a (${T_2a_actual_C}°C) 必须 高于 冷凝饱和温度 Tc (${Tc_C}°C)，否则气体无法在冷凝器中放热。`
+            );
+        }
+        if (subcooling_K < 0) {
+            throw new Error(
+                `[物理逻辑错误]\n过冷度 (${subcooling_K} K) 必须为正数或0。\n(您输入的-5 K 是无效的，会导致冷凝器出口温度高于冷凝温度)`
+            );
+        }
+        // --- 校验结束 ---
+
+        // 校验 (基础)
+        if (isNaN(Te_C) || isNaN(superheat_K)) {
+            throw new Error("热力学工况参数包含无效数字。");
         }
         if (isNaN(eta_v) || isNaN(eta_s_input) || eta_v <= 0 || eta_s_input <= 0) {
             throw new Error("效率参数必须是大于零的数字。");
@@ -109,7 +123,7 @@ function calculateMode2() {
 
         // --- C. 计算热力学状态点 ---
         const T_evap_K = Te_C + 273.15;
-        const T_cond_K = Tc_C + 273.15;
+        const T_cond_K = Tc_C + 273.15; // 高压由 Tc 决定
         const Pe_Pa = CP_INSTANCE.PropsSI('P', 'T', T_evap_K, 'Q', 1, fluid);
         const Pc_Pa = CP_INSTANCE.PropsSI('P', 'T', T_cond_K, 'Q', 1, fluid);
 
@@ -128,19 +142,17 @@ function calculateMode2() {
         const T_2s_K = CP_INSTANCE.PropsSI('T', 'P', Pc_Pa, 'S', s_1, fluid);
         
         // 状态 3 (节流阀前)
-        const T_3_K = T_cond_K - subcooling_K;
+        const T_3_K = T_cond_K - subcooling_K; // (v2.1 校验已确保 T_3 <= T_cond)
         const h_3 = CP_INSTANCE.PropsSI('H', 'T', T_3_K, 'P', Pc_Pa, fluid);
         
         // 状态 4 (蒸发器入口)
         const h_4 = h_3;
 
         // --- D. (v2.0) 估算流量 (m_dot_act) ---
-        // (基于 η_v 估算)
         const V_act_m3_s = V_th_m3_s * eta_v;
         const m_dot_act = V_act_m3_s * rho_1;
 
         // --- E. (v2.0) 估算功率 (W_shaft_W, W_input_W) ---
-        // (基于 η_s 估算)
         const Ws_W = m_dot_act * (h_2s - h_1); // 理论等熵功率
         
         let W_shaft_W, W_input_W;
@@ -148,72 +160,51 @@ function calculateMode2() {
         let eff_mode_desc = "";
 
         if (eff_mode === 'shaft') {
-            eta_s_shaft = eta_s_input; // 输入的是 η_s (轴)
+            eta_s_shaft = eta_s_input; 
             W_shaft_W = Ws_W / eta_s_shaft;
-            
             if (isNaN(motor_eff) || motor_eff <= 0) {
                  throw new Error("电机效率必须是大于零的数字。");
             }
             W_input_W = W_shaft_W / motor_eff;
-            eta_s_total = Ws_W / W_input_W; // 反算 η_total
-            
+            eta_s_total = Ws_W / W_input_W;
             eff_mode_desc = `效率基准: 轴功率 (η_s = ${eta_s_shaft.toFixed(4)})`;
-
         } else { // 'input'
-            eta_s_total = eta_s_input; // 输入的是 η_total (总)
+            eta_s_total = eta_s_input;
             W_input_W = Ws_W / eta_s_total;
-            
             if (isNaN(motor_eff) || motor_eff <= 0) {
                  throw new Error("当基于输入功率计算时，电机效率必须是大于零的数字。");
             }
             W_shaft_W = W_input_W * motor_eff;
-            eta_s_shaft = Ws_W / W_shaft_W; // 反算 η_s
-            
+            eta_s_shaft = Ws_W / W_shaft_W;
             eff_mode_desc = `效率基准: 输入功率 (η_total = ${eta_s_total.toFixed(4)})`;
         }
 
         // --- F. (v2.0) 计算实际出口 (State 2a) 和容量 ---
-        // (基于输入的 T_2a_actual_C 估算)
-        const T_2a_act_K = T_2a_actual_C + 273.15;
-        if (T_2a_act_K <= T_1_K) {
-            throw new Error("预估的实际排气温度必须高于吸气温度。");
-        }
-        if (T_2a_act_K > (T_2s_K + 100)) {
-            // 这是一个善意的警告，不是错误
-            console.warn("输入的实际排气温度 T2a 远高于理论等熵排温 T2s。");
-        }
+        const T_2a_act_K = T_2a_actual_C + 273.15; // 高温由 T_2a 决定
+        // (v2.1 校验已确保 T_2a_act_K > T_cond_K)
 
         const h_2a_act = CP_INSTANCE.PropsSI('H', 'T', T_2a_act_K, 'P', Pc_Pa, fluid);
         
-        // 制冷量
         const Q_evap_W = m_dot_act * (h_1 - h_4);
-        // 冷凝器负荷 (仅工质在冷凝器中放出的热)
-        const Q_cond_W = m_dot_act * (h_2a_act - h_3);
+        const Q_cond_W = m_dot_act * (h_2a_act - h_3); 
+        // (v2.1: 此时 h_2a_act > h_3, Q_cond 必为正)
 
         // --- G. (v2.0) 计算油冷负荷 (Q_oil_W) ---
-        // 能量平衡: W_shaft = Q_gas + Q_oil
-        // Q_gas = 工质在压缩机内吸收的热量 = m_dot * (h_2a_act - h_1)
         const Q_gas_heat_W = m_dot_act * (h_2a_act - h_1);
         const Q_oil_W = W_shaft_W - Q_gas_heat_W;
 
         if (Q_oil_W < 0) {
-            throw new Error(`计算得到的油冷负荷为负数 (${(Q_oil_W/1000).toFixed(2)} kW)。这在物理上是不可能的。请检查您的效率 (η_s) 是否设置过低，或者 (T_2a) 是否设置过高。`);
+            throw new Error(`计算得到的油冷负荷为负数 (${(Q_oil_W/1000).toFixed(2)} kW)。\n这在物理上是不可能的。请检查您的效率 (η_s) 是否设置过低，或者 (T_2a) 是否设置过高。`);
         }
 
         // --- H. (v2.0) 计算总排热和 COP ---
-        // 总排热 (能量平衡法) = 轴功 + 制冷量
         const Q_total_heat_W = W_shaft_W + Q_evap_W; 
         
-        // (v2.0 交叉验证)
-        // 总排热 (部件加和法) = 冷凝器负荷 + 油冷负荷
-        // const Q_total_check_W = Q_cond_W + Q_oil_W; 
-        // (备注: Q_total_heat_W 和 Q_total_check_W 理论上应相等)
-
         const COP_R = Q_evap_W / W_input_W;
         const COP_H_cond = Q_cond_W / W_input_W; // 仅冷凝器COP
         const COP_H_total = Q_total_heat_W / W_input_W; // 总热回收COP (冷凝器+油冷)
 
-        // --- I. (v2.0) 格式化输出 ---
+        // --- I. (v2.1) 格式化输出 ---
         let output = `
 --- 压缩机规格 (估算) ---
 工质: ${fluid}
@@ -244,7 +235,7 @@ ${eff_mode_desc}
 电机效率 (η_motor): ${eff_mode === 'shaft' ? motor_eff.toFixed(4) + ' (输入值)' : (motor_eff.toFixed(4))}
 
 ========================================
-           性能估算结果 (v2.0)
+           性能估算结果 (v2.1)
 ========================================
 制冷量 (Q_evap):     ${(Q_evap_W / 1000).toFixed(3)} kW
   (备注: m_dot * (h1 - h4))
@@ -270,7 +261,7 @@ COP (总热回收, COP_H_total): ${COP_H_total.toFixed(3)} (Q_total_heat / W_inp
         printButtonM2.disabled = false;
 
     } catch (error) {
-        resultsDivM2.textContent = `计算出错 (M2 v2.0): ${error.message}\n\n请检查输入参数是否在工质的有效范围内, 以及效率和T2a是否匹配。`;
+        resultsDivM2.textContent = `计算出错 (M2 v2.1): ${error.message}\n\n请检查输入参数是否在工质的有效范围内, 以及效率和T2a是否匹配。`;
         console.error("Mode 2 Error:", error);
         lastMode2ResultText = null;
         printButtonM2.disabled = true;
@@ -278,7 +269,7 @@ COP (总热回收, COP_H_total): ${COP_H_total.toFixed(3)} (Q_total_heat / W_inp
 }
 
 /**
- * (v2.0 喷油预测版) 模式二 (制冷热泵) 打印报告
+ * (v2.1 喷油预测版) 模式二 (制冷热泵) 打印报告
  */
 function printReportMode2() {
     if (!lastMode2ResultText) {
@@ -287,14 +278,14 @@ function printReportMode2() {
     }
 
     const inputs = {
-        "报告类型": `模式二: 性能估算 (制冷热泵 - 喷油版 v2.0)`,
+        "报告类型": `模式二: 性能估算 (制冷热泵 - 喷油版 v2.1)`,
         "工质": document.getElementById('fluid_m2').value,
         "理论输气量模式": document.querySelector('input[name="flow_mode_m2"]:checked').value === 'rpm' ? '按转速与排量' : '按体积流量',
         "转速 (RPM)": document.getElementById('rpm_m2').value,
         "排量 (cm³/rev)": document.getElementById('displacement_m2').value,
         "理论体积流量 (m³/h)": document.getElementById('flow_m3h_m2').value,
-        "蒸发温度 (°C)": document.getElementById('temp_evap_m2').value,
-        "冷凝温度 (°C)": document.getElementById('temp_cond_m2').value,
+        "蒸发饱和温度 (T_e) (°C)": document.getElementById('temp_evap_m2').value,
+        "冷凝饱和温度 (T_c) (°C)": document.getElementById('temp_cond_m2').value,
         "有效过热度 (K)": document.getElementById('superheat_m2').value,
         "过冷度 (K)": document.getElementById('subcooling_m2').value,
         "效率基准": document.querySelector('input[name="eff_mode_m2"]:checked').value === 'shaft' ? '基于轴功率 (η_s)' : '基于输入功率 (η_total)',
@@ -359,7 +350,7 @@ function callPrint(inputs, resultText, modeTitle) {
 // =====================================================================
 
 /**
- * (v2.0 喷油预测版) 模式二：初始化函数
+ * (v2.1 喷油预测版) 模式二：初始化函数
  * @param {object} CP - CoolProp 实例
  */
 export function initMode2(CP) {
@@ -408,5 +399,5 @@ export function initMode2(CP) {
         }
     }
     
-    console.log("模式二 (喷油制冷 v2.0) 已初始化。");
+    console.log("模式二 (喷油制冷 v2.1) 已初始化。");
 }
