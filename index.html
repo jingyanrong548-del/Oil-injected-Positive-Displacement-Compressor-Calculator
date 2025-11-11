@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>喷油容积式压缩机计算器 v1.0</title>
+    <title>喷油容积式压缩机计算器 v2.0 (喷油预测版)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         /* ... 样式表 (大部分无变化) ... */
@@ -82,8 +82,6 @@
             display: block;
         }
         
-        /* (v1.0 喷油版) 移除 .sub-tab-button 样式 */
-
         /* 打印样式 */
         @media print {
             body > *:not(#print-container) {
@@ -154,17 +152,17 @@
 <body class="bg-gray-100 font-sans antialiased">
 
     <div class="container mx-auto p-4 sm:p-8 max-w-4xl">
-        <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">喷油容积式压缩机计算器 v1.0</h1>
+        <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">喷油容积式压缩机计算器 v2.0 (喷油预测版)</h1>
         
         <div class="flex border-b-2 border-gray-300 mb-0">
             <button id="tab-btn-m1" class="tab-button active">
                 模式一: 性能评估
             </button>
             <button id="tab-btn-m2" class="tab-button">
-                模式二: 制冷热泵
+                模式二: 制冷热泵 (估算)
             </button>
             <button id="tab-btn-m3" class="tab-button">
-                模式三: 气体压缩
+                模式三: 气体压缩 (估算)
             </button>
         </div>
 
@@ -367,7 +365,7 @@
                                     🖨️ 打印报告 (A4)
                                 </button>
                                 <button type="button" id="transfer-to-mode-2" class="w-full bg-purple-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-50 transition duration-300 ease-in-out" disabled>
-                                    ➜ 将此工况代入模式二 (预测)
+                                    ➜ 将此工况代入模式二 (估算)
                                 </button>
                             </div>
                         </div>
@@ -381,14 +379,14 @@
             <div id="mode-2-container">
                 <div class="bg-white p-6 sm:p-8">
 
-                    <h2 class="text-3xl font-bold text-center text-gray-800 pt-0 sm:pt-0 mb-6">模式二: 制冷热泵 (喷油)</h2>
+                    <h2 class="text-3xl font-bold text-center text-gray-800 pt-0 sm:pt-0 mb-6">模式二: 制冷热泵 (喷油估算)</h2>
                     
                     <div id="mode-2a-content-moved">
                         <form id="calc-form-mode-2">
                             <h2 class="text-2xl font-semibold text-green-700 mb-4 border-b pb-2">1. 输入参数 (模式二)</h2>
                             <blockquote class="bg-green-50 border-l-4 border-green-500 text-green-800 p-4 mb-4" role="alert">
                                 <p><b>适用范围:</b> 喷油螺杆机、喷油滑片机等容积式压缩机。</p>
-                                <p class="mt-1"><b>计算模型:</b> 基于 **等熵效率 (η_s)** 预测轴功和制冷/热量。<b>注意:</b> 预测的排气温度 T2a 是理论绝热排温，会远高于喷油机的实际排温。</p>
+                                <p class="mt-1"><b>计算模型:</b> 基于 **等熵效率 (η_s)**、**容积效率 (η_v)** 和 **预估的实际排气温度 (T2a)** 估算性能和油冷负荷。</p>
                             </blockquote>
 
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6">
@@ -522,33 +520,24 @@
                                             </label>
                                             <input type="number" id="eta_v_m2" value="0.901" step="any" min="0.1" max="1.5" class="w-full p-2 border border-gray-300 rounded-md focus:ring-green-500 focus:border-green-500" required>
                                         </div>
-                                        <div id="motor-eff-group-m2" class="input-group" style="display: block;"> <label for="motor_eff_m2" class="block text-sm font-medium text-gray-700 mb-1">电机效率</label>
+                                        <div id="motor-eff-group-m2" class="input-group" style="display: block;"> <label for="motor_eff_m2" class="block text-sm font-medium text-gray-700 mb-1">电机效率</l
+bel>
                                             <input type="number" id="motor_eff_m2" value="0.95" step="0.01" min="0.5" max="1.0" class="w-full p-2 border border-gray-300 rounded-md focus:ring-green-500 focus:border-green-500">
                                         </div>
                                     </fieldset>
 
-                                    <fieldset class="border p-4 rounded-lg mb-4">
-                                        <legend class="font-medium px-2">可选计算: 后冷却器</legend>
-                                        
+                                    <fieldset class="border p-4 rounded-lg mb-4 bg-yellow-50 border-yellow-400">
+                                        <legend class="font-medium px-2 text-yellow-800">喷油效果 (关键输入)</legend>
                                         <div class="input-group">
-                                            <label class="inline-flex items-center cursor-pointer">
-                                                <input type="checkbox" id="enable_cooler_calc_m2" class="form-checkbox h-5 w-5 text-green-600">
-                                                <span class="ml-2 font-medium text-gray-700">计算后冷却器负荷</span>
-                                            </label>
-                                        </div>
-
-                                        <div id="cooler-inputs-m2" style="display: none;">
-                                            <div class="input-group">
-                                                <label for="target_temp_m2" class="block text-sm font-medium text-gray-700 mb-1">
-                                                    目标冷却后温度 (°C)
-                                                    <span class="tooltip">(?)
-                                                        <span class="tooltiptext">
-                                                            输入制冷剂气体经过后冷却器(Desuperheater)后，进入冷凝器之前的目标温度。此温度必须低于计算出的 T2a (理论绝热排温)。
-                                                        </span>
+                                            <label for="temp_discharge_actual_m2" class="block text-sm font-medium text-gray-700 mb-1">
+                                                预估的实际排气温度 T2a (°C)
+                                                <span class="tooltip">(?)
+                                                    <span class="tooltiptext">
+                                                        这是喷油模型的核心输入。输入您预估的、经过喷油冷却后的实际排气温度。
                                                     </span>
-                                                </label>
-                                                <input type="number" id="target_temp_m2" value="100" step="0.1" class="w-full p-2 border border-gray-300 rounded-md focus:ring-green-500 focus:border-green-500">
-                                            </div>
+                                                </span>
+                                            </label>
+                                            <input type="number" id="temp_discharge_actual_m2" value="80" step="0.1" class="w-full p-2 border border-gray-300 rounded-md focus:ring-green-500 focus:border-green-500" required>
                                         </div>
                                     </fieldset>
 
@@ -585,13 +574,13 @@
             <div id="mode-3-container">
                 <div class="bg-white p-6 sm:p-8">
 
-                    <h2 class="text-3xl font-bold text-center text-gray-800 mb-6">模式三: 气体压缩 (喷油)</h2>
+                    <h2 class="text-3xl font-bold text-center text-gray-800 mb-6">模式三: 气体压缩 (喷油估算)</h2>
                     
                     <form id="calc-form-mode-3">
                         <h2 class="text-2xl font-semibold text-indigo-700 mb-4 border-b pb-2">1. 输入参数 (模式三)</h2>
                         <blockquote class="bg-indigo-50 border-l-4 border-indigo-500 text-indigo-800 p-4 mb-4" role="alert">
                             <p><b>适用范围:</b> 喷油空压机、气体压缩机等。</p>
-                            <p class="mt-1"><b>计算模型:</b> 基于 **等温效率 (η_iso)** 预测轴功。这是喷油压缩机的行业标准模型。</p>
+                            <p class="mt-1"><b>计算模型:</b> 基于 **等温效率 (η_iso)**、**容积效率 (η_v)** 和 **预估的实际排气温度 (T2a)** 估算性能和油冷负荷。</p>
                         </blockquote>
 
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6">
@@ -712,28 +701,18 @@
                                     </div>
                                 </fieldset>
 
-                                <fieldset class="border p-4 rounded-lg mb-4">
-                                    <legend class="font-medium px-2">可选计算: 后冷却器</legend>
-                                    
+                                <fieldset class="border p-4 rounded-lg mb-4 bg-yellow-50 border-yellow-400">
+                                    <legend class="font-medium px-2 text-yellow-800">喷油效果 (关键输入)</legend>
                                     <div class="input-group">
-                                        <label class="inline-flex items-center cursor-pointer">
-                                            <input type="checkbox" id="enable_cooler_calc_m3" class="form-checkbox h-5 w-5 text-indigo-600">
-                                            <span class="ml-2 font-medium text-gray-700">计算后冷却器负荷</span>
-                                        </label>
-                                    </div>
-
-                                    <div id="cooler-inputs-m3" style="display: none;">
-                                        <div class="input-group">
-                                            <label for="target_temp_m3" class="block text-sm font-medium text-gray-700 mb-1">
-                                                目标冷却后温度 (°C)
-                                                <span class="tooltip">(?)
-                                                    <span class="tooltiptext">
-                                                        输入气体经过后冷却器后的目标温度。此温度必须低于计算出的 T2a (实际排气温度)。
-                                                    </span>
+                                        <label for="temp_discharge_actual_m3" class="block text-sm font-medium text-gray-700 mb-1">
+                                            预估的实际排气温度 T2a (°C)
+                                            <span class="tooltip">(?)
+                                                <span class="tooltiptext">
+                                                    这是喷油模型的核心输入。输入您预估的、经过喷油冷却后的实际排气温度。
                                                 </span>
-                                            </label>
-                                            <input type="number" id="target_temp_m3" value="40" step="0.1" class="w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500">
-                                        </div>
+                                            </span>
+                                        </label>
+                                        <input type="number" id="temp_discharge_actual_m3" value="85" step="0.1" class="w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500" required>
                                     </div>
                                 </fieldset>
 
@@ -767,7 +746,7 @@
         </div>
 
     <footer class="text-center text-gray-600 text-sm mt-8 pb-4 max-w-4xl mx-auto px-4">
-        <p><strong>版本:</strong> v1.0 (喷油版)</p>
+        <p><strong>版本:</strong> v2.0 (喷油预测版)</p>
         <p><strong>编者:</strong> 荆炎荣 (Jing Yanrong)</p>
         <blockquote class="mt-2 border-l-4 border-gray-300 pl-4 italic">
             编者已尽力确保本计算器结果的准确性，但不对任何因使用本工具而导致的潜在错误或损失承担责任。计算结果仅供参考。

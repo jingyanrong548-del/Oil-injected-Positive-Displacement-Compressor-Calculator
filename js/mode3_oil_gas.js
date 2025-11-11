@@ -1,8 +1,8 @@
 // =====================================================================
-// mode3_oil_gas.js: 模式三 (气体压缩) 模块 - (喷油版 v1.0)
-// 版本: v1.0
+// mode3_oil_gas.js: 模式三 (气体压缩) 模块 - (喷油预测版 v2.0)
+// 版本: v2.0
 // 职责: 1. 初始化模式三的 UI 事件
-//        2. 执行模式三 (预测) 的计算 (基于等温效率 η_iso)
+//        2. 执行模式三 (估算) 的计算 (基于 η_iso, η_v 和 T_2a)
 //        3. 处理打印
 // =====================================================================
 
@@ -16,7 +16,7 @@ let lastMode3ResultText = null;
 let calcButtonM3, resultsDivM3, calcFormM3, printButtonM3;
 let fluidSelectM3, fluidInfoDivM3;
 let allInputsM3;
-let enableCoolerCalcM3, targetTempM3;
+let tempDischargeActualM3; // v2.0: 新增 T2a 输入
 
 // =====================================================================
 // 模式三 (气体压缩) 专用函数
@@ -47,7 +47,7 @@ function setButtonFresh3() {
 }
 
 /**
- * 模式三 (气体压缩) 主计算函数 (喷油版 v1.0)
+ * 模式三 (气体压缩) 主计算函数 (喷油预测版 v2.0)
  */
 function calculateMode3() {
     try {
@@ -59,11 +59,14 @@ function calculateMode3() {
         const Te_C = parseFloat(document.getElementById('temp_in_m3').value);
         const Pc_bar = parseFloat(document.getElementById('press_out_m3').value);
         
+        // v2.0: 喷油效果 (关键输入)
+        const T_2a_actual_C = parseFloat(tempDischargeActualM3.value);
+
         // 压缩机
         const flow_mode = document.querySelector('input[name="flow_mode_m3"]:checked').value;
         const eta_v = parseFloat(document.getElementById('eta_v_m3').value);
         
-        // (v1.0 喷油版) 效率 (基于等温)
+        // 效率
         const eff_mode = document.querySelector('input[name="eff_mode_m3"]:checked').value; // 'shaft' 或 'input'
         const eta_iso_input = parseFloat(document.getElementById('eta_iso_m3').value); // η_iso 或 η_iso_total
         const motor_eff = parseFloat(document.getElementById('motor_eff_m3').value);
@@ -74,6 +77,9 @@ function calculateMode3() {
         }
         if (Pc_bar <= Pe_bar) {
             throw new Error("排气压力必须高于吸气压力。");
+        }
+         if (isNaN(T_2a_actual_C)) { // v2.0 校验
+            throw new Error("“预估的实际排气温度 T2a” 必须是有效数字。");
         }
         if (isNaN(eta_v) || isNaN(eta_iso_input) || eta_v <= 0 || eta_iso_input <= 0) {
             throw new Error("效率参数必须是大于零的数字。");
@@ -110,16 +116,15 @@ function calculateMode3() {
 
         // 状态 1 (吸气口)
         const h_1 = CP_INSTANCE.PropsSI('H', 'T', T_1_K, 'P', Pe_Pa, fluid);
-        // const s_1 = CP_INSTANCE.PropsSI('S', 'T', T_1_K, 'P', Pe_Pa, fluid); // (v1.0) 不再需要 s_1
         const rho_1 = CP_INSTANCE.PropsSI('D', 'T', T_1_K, 'P', Pe_Pa, fluid); // 吸气密度
-
-        // (v1.0 喷油版) 移除 状态 2s (等熵出口)
         
-        // --- D. 计算流量 (m_dot_act) ---
+        // --- D. (v2.0) 估算流量 (m_dot_act) ---
+        // (基于 η_v 估算)
         const V_act_m3_s = V_th_m3_s * eta_v;
         const m_dot_act = V_act_m3_s * rho_1;
 
-        // --- E. (v1.0 喷油版) 基于等温效率计算功率 ---
+        // --- E. (v2.0) 估算功率 (W_shaft_W, W_input_W) ---
+        // (基于 η_iso 估算)
         
         // E.1: 计算理论等温功率 (W_iso_W)
         let W_iso_W;
@@ -166,72 +171,63 @@ function calculateMode3() {
         }
 
 
-        // --- F. 计算理论排气温度 (T2a) 和排热量 ---
-        // (v1.0 喷油版) 注意: T2a 是基于绝热假设计算的
-        const h_2a = h_1 + (W_shaft_W / m_dot_act);
-        const T_2a_K = CP_INSTANCE.PropsSI('T', 'P', Pc_Pa, 'H', h_2a, fluid);
-        
-        const Q_discharge_W = m_dot_act * (h_2a - h_1); // 压缩总排热
-        
-
-        // --- G. 可选: 计算后冷却器 ---
-        let cooler_output = "";
-        if (enableCoolerCalcM3.checked) {
-            const target_temp_C = parseFloat(targetTempM3.value);
-            if (isNaN(target_temp_C)) {
-                cooler_output = "\n--- 后冷却器 (Aftercooler) ---\n错误: 目标冷却后温度无效。";
-            } else {
-                const target_temp_K = target_temp_C + 273.15;
-                if (target_temp_K >= T_2a_K) {
-                    cooler_output = `\n--- 后冷却器 (Aftercooler) ---\n错误: 目标温度 (${target_temp_C.toFixed(2)} °C) 必须低于理论气体排温 (${(T_2a_K - 273.15).toFixed(2)} °C)。`;
-                } else {
-                    const h_cooler_out = CP_INSTANCE.PropsSI('H', 'T', target_temp_K, 'P', Pc_Pa, fluid);
-                    const Q_cooler_W = m_dot_act * (h_2a - h_cooler_out);
-                    
-                    cooler_output = `\n--- 后冷却器 (Aftercooler) ---
-后冷器负荷 (Q_cooler):   ${(Q_cooler_W / 1000).toFixed(3)} kW
-  (备注: T_2a_th ${(T_2a_K - 273.15).toFixed(2)} °C -> T_target ${target_temp_C.toFixed(2)} °C)`;
-                }
-            }
+        // --- F. (v2.0) 计算实际出口 (State 2a) ---
+        // (基于输入的 T_2a_actual_C 估算)
+        const T_2a_act_K = T_2a_actual_C + 273.15;
+         if (T_2a_act_K <= T_1_K) {
+            throw new Error("预估的实际排气温度必须高于吸气温度。");
         }
+        const h_2a_act = CP_INSTANCE.PropsSI('H', 'T', T_2a_act_K, 'P', Pc_Pa, fluid);
+        
+        // --- G. (v2.0) 计算油冷负荷 (Q_oil_W) ---
+        // 能量平衡: W_shaft = Q_gas + Q_oil
+        // Q_gas = 工质在压缩机内吸收的热量 = m_dot * (h_2a_act - h_1)
+        const Q_gas_heat_W = m_dot_act * (h_2a_act - h_1);
+        const Q_oil_W = W_shaft_W - Q_gas_heat_W;
 
-        // --- H. 格式化输出 (v1.0 喷油版) ---
+        if (Q_oil_W < 0) {
+            throw new Error(`计算得到的油冷负荷为负数 (${(Q_oil_W/1000).toFixed(2)} kW)。这在物理上是不可能的。请检查您的效率 (η_iso) 是否设置过低，或者 (T_2a) 是否设置过高。`);
+        }
+        
+        // 总排热 = 轴功
+        const Q_total_heat_W = W_shaft_W;
+
+        // --- H. 格式化输出 (v2.0 喷油版) ---
         let output = `
---- 压缩机规格 ---
+--- 压缩机规格 (估算) ---
 工质: ${fluid}
 理论输气量 (V_th): ${V_th_m3_s.toFixed(6)} m³/s (${(V_th_m3_s * 3600).toFixed(3)} m³/h)
   (来源: ${flow_input_source})
 实际吸气量 (V_act): ${V_act_m3_s.toFixed(6)} m³/s (V_th * η_v)
-实际质量流量 (m_dot): ${m_dot_act.toFixed(5)} kg/s
+估算质量流量 (m_dot): ${m_dot_act.toFixed(5)} kg/s (V_act * rho_1)
 
 --- 热力学状态点 ---
-1. 吸气 (Inlet):   T1 = ${Te_C.toFixed(2)} °C, P1 = ${Pe_bar.toFixed(3)} bar
-2a. 理论气体出口: T2a = ${(T_2a_K - 273.15).toFixed(2)} °C, P2 = ${Pc_bar.toFixed(3)} bar
-(h1: ${(h_1 / 1000).toFixed(2)} kJ/kg, h2a_th: ${(h_2a / 1000).toFixed(2)} kJ/kg)
+1. 吸气 (Inlet):   T1 = ${Te_C.toFixed(2)} °C, P1 = ${Pe_bar.toFixed(3)} bar, h1 = ${(h_1 / 1000).toFixed(2)} kJ/kg
+2a. 实际出口: T2a = ${T_2a_actual_C.toFixed(2)} °C (输入值), P2 = ${Pc_bar.toFixed(3)} bar, h2a = ${(h_2a_act / 1000).toFixed(2)} kJ/kg
 
---- 功率 (Power) ---
-理论等温功率 (W_iso):   ${(W_iso_W / 1000).toFixed(3)} kW
-实际轴功率 (W_shaft): ${(W_shaft_W / 1000).toFixed(3)} kW
-电机输入功率 (W_input): ${(W_input_W / 1000).toFixed(3)} kW
+--- 功率 (估算) ---
+理论等温功率 (W_iso):   ${(W_iso_W / 1000).toFixed(3)} kW (m_dot * R*T1*ln(P2/P1))
+估算轴功率 (W_shaft): ${(W_shaft_W / 1000).toFixed(3)} kW (W_iso / η_iso)
+估算输入功率 (W_input): ${(W_input_W / 1000).toFixed(3)} kW (W_shaft / η_motor)
 
---- 效率 (Efficiency) ---
+--- 效率 (输入) ---
 ${eff_mode_desc}
-(反算) 等温效率 (η_iso, 轴): ${eta_iso_shaft.toFixed(4)}  (W_iso / W_shaft)
-(反算) 总等温效率 (η_iso_total): ${eta_iso_total.toFixed(4)}  (W_iso / W_input)
+(反算) 等温效率 (η_iso, 轴): ${eta_iso_shaft.toFixed(4)}
+(反算) 总等温效率 (η_iso_total): ${eta_iso_total.toFixed(4)}
 容积效率 (η_v): ${eta_v.toFixed(4)}
 电机效率 (η_motor): ${eff_mode === 'shaft' ? motor_eff.toFixed(4) + ' (输入值)' : (motor_eff.toFixed(4))}
 
 ========================================
-           性能预测结果
+           性能估算结果 (v2.0)
 ========================================
-[!] 重要提示:
-    由于喷油冷却效应，压缩机【实际排气温度】
-    将会【远低于】上方计算的“理论气体出口 T2a”。
-    (T2a 假设了轴功全部转化为气体热量)
-
-总排热量 (Q_discharge): ${(Q_discharge_W / 1000).toFixed(3)} kW
-  (备注: Q_discharge = m_dot * (h2a_th - h1))
-${cooler_output}
+--- 热量分配 (Heat Distribution) ---
+气体吸收热量 (Q_gas): ${(Q_gas_heat_W / 1000).toFixed(3)} kW
+  (备注: m_dot * (h2a - h1), 此热量需由后冷却器带走)
+油冷负荷 (Q_oil_load): ${(Q_oil_W / 1000).toFixed(3)} kW
+  (备注: W_shaft - Q_gas, 此热量需由油冷却器带走)
+----------------------------------------
+总排热量 (Q_total_heat): ${(Q_total_heat_W / 1000).toFixed(3)} kW
+  (备注: Q_total_heat = Q_gas + Q_oil_load = W_shaft)
 `;
 
         resultsDivM3.textContent = output;
@@ -240,7 +236,7 @@ ${cooler_output}
         printButtonM3.disabled = false;
 
     } catch (error) {
-        resultsDivM3.textContent = `计算出错 (M3): ${error.message}\n\n请检查输入参数是否在工质的有效范围内。`;
+        resultsDivM3.textContent = `计算出错 (M3 v2.0): ${error.message}\n\n请检查输入参数是否在工质的有效范围内, 以及效率和T2a是否匹配。`;
         console.error("Mode 3 Error:", error);
         lastMode3ResultText = null;
         printButtonM3.disabled = true;
@@ -248,7 +244,7 @@ ${cooler_output}
 }
 
 /**
- * (v1.0 喷油版) 模式三 (气体压缩) 打印报告
+ * (v2.0 喷油预测版) 模式三 (气体压缩) 打印报告
  */
 function printReportMode3() {
     if (!lastMode3ResultText) {
@@ -257,7 +253,7 @@ function printReportMode3() {
     }
     
     const inputs = {
-        "报告类型": `模式三: 性能预测 (气体压缩 - 喷油版)`,
+        "报告类型": `模式三: 性能估算 (气体压缩 - 喷油版 v2.0)`,
         "工质": document.getElementById('fluid_m3').value,
         "理论输气量模式": document.querySelector('input[name="flow_mode_m3"]:checked').value === 'rpm' ? '按转速与排量' : '按体积流量',
         "转速 (RPM)": document.getElementById('rpm_m3').value,
@@ -270,8 +266,7 @@ function printReportMode3() {
         "等温/总等温效率": document.getElementById('eta_iso_m3').value,
         "容积效率 (η_v)": document.getElementById('eta_v_m3').value,
         "电机效率": document.getElementById('motor_eff_m3').value,
-        "计算后冷却器": document.getElementById('enable_cooler_calc_m3').checked ? '是' : '否',
-        "目标冷却后温度 (°C)": document.getElementById('target_temp_m3').value,
+        "预估的实际排气温度 T2a (°C)": document.getElementById('temp_discharge_actual_m3').value,
     };
     
     callPrint(inputs, lastMode3ResultText, "模式三");
@@ -328,7 +323,7 @@ function callPrint(inputs, resultText, modeTitle) {
 // =====================================================================
 
 /**
- * (v1.0 喷油版) 模式三：初始化函数
+ * (v2.0 喷油预测版) 模式三：初始化函数
  * @param {object} CP - CoolProp 实例
  */
 export function initMode3(CP) {
@@ -341,8 +336,8 @@ export function initMode3(CP) {
     printButtonM3 = document.getElementById('print-button-mode-3');
     fluidSelectM3 = document.getElementById('fluid_m3');
     fluidInfoDivM3 = document.getElementById('fluid-info-m3');
-    enableCoolerCalcM3 = document.getElementById('enable_cooler_calc_m3');
-    targetTempM3 = document.getElementById('target_temp_m3');
+    // v2.0: 绑定新输入
+    tempDischargeActualM3 = document.getElementById('temp_discharge_actual_m3');
 
     if (calcFormM3) {
         allInputsM3 = calcFormM3.querySelectorAll('input, select');
@@ -376,5 +371,5 @@ export function initMode3(CP) {
         }
     }
     
-    console.log("模式三 (喷油气体 v1.0) 已初始化。");
+    console.log("模式三 (喷油气体 v2.0) 已初始化。");
 }

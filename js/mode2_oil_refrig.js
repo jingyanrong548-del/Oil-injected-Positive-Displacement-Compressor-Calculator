@@ -1,8 +1,8 @@
 // =====================================================================
-// mode2_oil_refrig.js: 模式二 (制冷热泵) 模块 - (喷油版 v1.0)
-// 版本: v1.0
+// mode2_oil_refrig.js: 模式二 (制冷热泵) 模块 - (喷油预测版 v2.0)
+// 版本: v2.0
 // 职责: 1. 初始化模式二的 UI 事件
-//        2. 执行模式二 (预测) 的计算 (基于等熵效率 η_s)
+//        2. 执行模式二 (估算) 的计算 (基于 η_s, η_v 和 T_2a)
 //        3. 处理打印
 // =====================================================================
 
@@ -16,7 +16,7 @@ let lastMode2ResultText = null;
 let calcButtonM2, resultsDivM2, calcFormM2, printButtonM2;
 let fluidSelectM2, fluidInfoDivM2;
 let allInputsM2;
-let enableCoolerCalcM2, targetTempM2;
+let tempDischargeActualM2; // v2.0: 新增 T2a 输入
 
 // =====================================================================
 // 模式二 (制冷热泵) 专用函数
@@ -47,7 +47,7 @@ function setButtonFresh2() {
 }
 
 /**
- * 模式二 (制冷热泵) 主计算函数 (喷油版 v1.0)
+ * 模式二 (制冷热泵) 主计算函数 (喷油预测版 v2.0)
  */
 function calculateMode2() {
     try {
@@ -60,6 +60,9 @@ function calculateMode2() {
         const superheat_K = parseFloat(document.getElementById('superheat_m2').value);
         const subcooling_K = parseFloat(document.getElementById('subcooling_m2').value);
         
+        // v2.0: 喷油效果 (关键输入)
+        const T_2a_actual_C = parseFloat(tempDischargeActualM2.value);
+
         // 压缩机
         const flow_mode = document.querySelector('input[name="flow_mode_m2"]:checked').value;
         const eta_v = parseFloat(document.getElementById('eta_v_m2').value);
@@ -72,6 +75,9 @@ function calculateMode2() {
         // 校验 (基础)
         if (isNaN(Te_C) || isNaN(Tc_C) || isNaN(superheat_K) || isNaN(subcooling_K)) {
             throw new Error("热力学工况参数包含无效数字。");
+        }
+        if (isNaN(T_2a_actual_C)) { // v2.0 校验
+            throw new Error("“预估的实际排气温度 T2a” 必须是有效数字。");
         }
         if (isNaN(eta_v) || isNaN(eta_s_input) || eta_v <= 0 || eta_s_input <= 0) {
             throw new Error("效率参数必须是大于零的数字。");
@@ -128,11 +134,13 @@ function calculateMode2() {
         // 状态 4 (蒸发器入口)
         const h_4 = h_3;
 
-        // --- D. 计算流量 (m_dot_act) ---
+        // --- D. (v2.0) 估算流量 (m_dot_act) ---
+        // (基于 η_v 估算)
         const V_act_m3_s = V_th_m3_s * eta_v;
         const m_dot_act = V_act_m3_s * rho_1;
 
-        // --- E. 计算功率 (W_shaft_W, W_input_W) ---
+        // --- E. (v2.0) 估算功率 (W_shaft_W, W_input_W) ---
+        // (基于 η_s 估算)
         const Ws_W = m_dot_act * (h_2s - h_1); // 理论等熵功率
         
         let W_shaft_W, W_input_W;
@@ -164,90 +172,96 @@ function calculateMode2() {
             eff_mode_desc = `效率基准: 输入功率 (η_total = ${eta_s_total.toFixed(4)})`;
         }
 
-        // --- F. 计算实际出口 (State 2a) 和容量 ---
-        // (v1.0 喷油版) 注意: h_2a 是基于绝热假设计算的
-        const h_2a = h_1 + (W_shaft_W / m_dot_act);
-        const T_2a_K = CP_INSTANCE.PropsSI('T', 'P', Pc_Pa, 'H', h_2a, fluid);
-        
-        const Q_evap_W = m_dot_act * (h_1 - h_4); // 制冷量
-        const Q_cond_W = m_dot_act * (h_2a - h_3); // 制热量 (冷凝器)
-        const Q_discharge_W = W_shaft_W + Q_evap_W; // 能量平衡法: 制热量 = 轴功 + 制冷量
-        
-        // --- G. 计算 COP ---
-        const COP_R = Q_evap_W / W_input_W;
-        const COP_H = Q_discharge_W / W_input_W;
-
-        // --- H. 可选: 计算后冷却器 ---
-        let cooler_output = "";
-        if (enableCoolerCalcM2.checked) {
-            const target_temp_C = parseFloat(targetTempM2.value);
-            if (isNaN(target_temp_C)) {
-                cooler_output = "\n--- 后冷却器 (Desuperheater) ---\n错误: 目标冷却后温度无效。";
-            } else {
-                const target_temp_K = target_temp_C + 273.15;
-                if (target_temp_K >= T_2a_K) {
-                    cooler_output = `\n--- 后冷却器 (Desuperheater) ---\n错误: 目标温度 (${target_temp_C.toFixed(2)} °C) 必须低于理论绝热排温 (${(T_2a_K - 273.15).toFixed(2)} °C)。`;
-                } else {
-                    const h_cooler_out = CP_INSTANCE.PropsSI('H', 'T', target_temp_K, 'P', Pc_Pa, fluid);
-                    const Q_cooler_W = m_dot_act * (h_2a - h_cooler_out);
-                    const Q_cond_remaining_W = m_dot_act * (h_cooler_out - h_3); 
-                    
-                    cooler_output = `\n--- 后冷却器 (Desuperheater) ---
-后冷器负荷 (Q_cooler):   ${(Q_cooler_W / 1000).toFixed(3)} kW
-  (备注: T_2a_th ${(T_2a_K - 273.15).toFixed(2)} °C -> T_target ${target_temp_C.toFixed(2)} °C)
-剩余冷凝负荷 (Q_cond): ${(Q_cond_remaining_W / 1000).toFixed(3)} kW
-总排热负荷 (Q_total):    ${((Q_cooler_W + Q_cond_remaining_W) / 1000).toFixed(3)} kW
-  (备注: Q_total 应等于 Q_discharge)`;
-                }
-            }
+        // --- F. (v2.0) 计算实际出口 (State 2a) 和容量 ---
+        // (基于输入的 T_2a_actual_C 估算)
+        const T_2a_act_K = T_2a_actual_C + 273.15;
+        if (T_2a_act_K <= T_1_K) {
+            throw new Error("预估的实际排气温度必须高于吸气温度。");
+        }
+        if (T_2a_act_K > (T_2s_K + 100)) {
+            // 这是一个善意的警告，不是错误
+            console.warn("输入的实际排气温度 T2a 远高于理论等熵排温 T2s。");
         }
 
-        // --- I. (v1.0 喷油版) 格式化输出 (增加警告) ---
+        const h_2a_act = CP_INSTANCE.PropsSI('H', 'T', T_2a_act_K, 'P', Pc_Pa, fluid);
+        
+        // 制冷量
+        const Q_evap_W = m_dot_act * (h_1 - h_4);
+        // 冷凝器负荷 (仅工质在冷凝器中放出的热)
+        const Q_cond_W = m_dot_act * (h_2a_act - h_3);
+
+        // --- G. (v2.0) 计算油冷负荷 (Q_oil_W) ---
+        // 能量平衡: W_shaft = Q_gas + Q_oil
+        // Q_gas = 工质在压缩机内吸收的热量 = m_dot * (h_2a_act - h_1)
+        const Q_gas_heat_W = m_dot_act * (h_2a_act - h_1);
+        const Q_oil_W = W_shaft_W - Q_gas_heat_W;
+
+        if (Q_oil_W < 0) {
+            throw new Error(`计算得到的油冷负荷为负数 (${(Q_oil_W/1000).toFixed(2)} kW)。这在物理上是不可能的。请检查您的效率 (η_s) 是否设置过低，或者 (T_2a) 是否设置过高。`);
+        }
+
+        // --- H. (v2.0) 计算总排热和 COP ---
+        // 总排热 (能量平衡法) = 轴功 + 制冷量
+        const Q_total_heat_W = W_shaft_W + Q_evap_W; 
+        
+        // (v2.0 交叉验证)
+        // 总排热 (部件加和法) = 冷凝器负荷 + 油冷负荷
+        // const Q_total_check_W = Q_cond_W + Q_oil_W; 
+        // (备注: Q_total_heat_W 和 Q_total_check_W 理论上应相等)
+
+        const COP_R = Q_evap_W / W_input_W;
+        const COP_H_cond = Q_cond_W / W_input_W; // 仅冷凝器COP
+        const COP_H_total = Q_total_heat_W / W_input_W; // 总热回收COP (冷凝器+油冷)
+
+        // --- I. (v2.0) 格式化输出 ---
         let output = `
---- 压缩机规格 ---
+--- 压缩机规格 (估算) ---
 工质: ${fluid}
 理论输气量 (V_th): ${V_th_m3_s.toFixed(6)} m³/s (${(V_th_m3_s * 3600).toFixed(3)} m³/h)
   (来源: ${flow_input_source})
 实际吸气量 (V_act): ${V_act_m3_s.toFixed(6)} m³/s (V_th * η_v)
-实际质量流量 (m_dot): ${m_dot_act.toFixed(5)} kg/s
+估算质量流量 (m_dot): ${m_dot_act.toFixed(5)} kg/s (V_act * rho_1)
 
 --- 热力学状态点 ---
 蒸发 (Evap):   Te = ${Te_C.toFixed(2)} °C, Pe = ${(Pe_Pa / 1e5).toFixed(3)} bar
 冷凝 (Cond):   Tc = ${Tc_C.toFixed(2)} °C, Pc = ${(Pc_Pa / 1e5).toFixed(3)} bar
 1. 吸气 (Inlet):   T1 = ${(T_1_K - 273.15).toFixed(2)} °C (过热 ${superheat_K} K), h1 = ${(h_1 / 1000).toFixed(2)} kJ/kg, s1 = ${(s_1 / 1000).toFixed(4)} kJ/kg·K
 2s. 等熵出口: T2s = ${(T_2s_K - 273.15).toFixed(2)} °C, h2s = ${(h_2s / 1000).toFixed(2)} kJ/kg
-2a. 理论绝热出口: T2a = ${(T_2a_K - 273.15).toFixed(2)} °C, h2a = ${(h_2a / 1000).toFixed(2)} kJ/kg
+2a. 实际出口: T2a = ${T_2a_actual_C.toFixed(2)} °C (输入值), h2a = ${(h_2a_act / 1000).toFixed(2)} kJ/kg
+3. 节流阀前: T3 = ${(T_3_K - 273.15).toFixed(2)} °C (过冷 ${subcooling_K} K), h3 = ${(h_3 / 1000).toFixed(2)} kJ/kg
+4. 蒸发器入口: h4 = ${(h_4 / 1000).toFixed(2)} kJ/kg
 
---- 功率 (Power) ---
+--- 功率 (估算) ---
 理论等熵功率 (Ws):   ${(Ws_W / 1000).toFixed(3)} kW (m_dot * (h2s - h1))
-实际轴功率 (W_shaft): ${(W_shaft_W / 1000).toFixed(3)} kW
-电机输入功率 (W_input): ${(W_input_W / 1000).toFixed(3)} kW
+估算轴功率 (W_shaft): ${(W_shaft_W / 1000).toFixed(3)} kW (Ws / η_s)
+估算输入功率 (W_input): ${(W_input_W / 1000).toFixed(3)} kW (W_shaft / η_motor)
 
---- 效率 (Efficiency) ---
+--- 效率 (输入) ---
 ${eff_mode_desc}
-(反算) 等熵效率 (η_s, 轴): ${eta_s_shaft.toFixed(4)}  (Ws / W_shaft)
-(反算) 总等熵效率 (η_total): ${eta_s_total.toFixed(4)}  (Ws / W_input)
+(反算) 等熵效率 (η_s, 轴): ${eta_s_shaft.toFixed(4)}
+(反算) 总等熵效率 (η_total): ${eta_s_total.toFixed(4)}
 容积效率 (η_v): ${eta_v.toFixed(4)}
 电机效率 (η_motor): ${eff_mode === 'shaft' ? motor_eff.toFixed(4) + ' (输入值)' : (motor_eff.toFixed(4))}
 
 ========================================
-           性能预测结果
+           性能估算结果 (v2.0)
 ========================================
-[!] 重要提示:
-    由于喷油冷却效应，压缩机【实际排气温度】
-    将会【远低于】上方计算的“理论绝热出口 T2a”。
-    本模型(基于 η_s)主要用于预测【轴功】和【制冷/热量】。
-
 制冷量 (Q_evap):     ${(Q_evap_W / 1000).toFixed(3)} kW
-总制热量 (Q_discharge): ${(Q_discharge_W / 1000).toFixed(3)} kW
-  (备注: Q_discharge = W_shaft + Q_evap)
-冷凝器热量 (Q_cond):   ${(Q_cond_W / 1000).toFixed(3)} kW
-  (备注: Q_cond = m_dot * (h2a - h3))
+  (备注: m_dot * (h1 - h4))
+
+--- 热回收 (Heat Recovery) ---
+冷凝器负荷 (Q_cond):   ${(Q_cond_W / 1000).toFixed(3)} kW
+  (备注: m_dot * (h2a - h3))
+油冷负荷 (Q_oil_load): ${(Q_oil_W / 1000).toFixed(3)} kW
+  (备注: W_shaft - m_dot * (h2a - h1))
+----------------------------------------
+总排热量 (Q_total_heat): ${(Q_total_heat_W / 1000).toFixed(3)} kW
+  (备注: Q_total_heat = Q_cond + Q_oil = W_shaft + Q_evap)
 
 --- 性能系数 (COP) ---
-COP (制冷, COP_R):   ${COP_R.toFixed(3)} (Q_evap / W_input)
-COP (制热, COP_H):   ${COP_H.toFixed(3)} (Q_discharge / W_input)
-${cooler_output}
+COP (制冷, COP_R):       ${COP_R.toFixed(3)} (Q_evap / W_input)
+COP (制热, COP_H_cond):  ${COP_H_cond.toFixed(3)} (Q_cond / W_input)
+COP (总热回收, COP_H_total): ${COP_H_total.toFixed(3)} (Q_total_heat / W_input)
 `;
 
         resultsDivM2.textContent = output;
@@ -256,7 +270,7 @@ ${cooler_output}
         printButtonM2.disabled = false;
 
     } catch (error) {
-        resultsDivM2.textContent = `计算出错 (M2): ${error.message}\n\n请检查输入参数是否在工质的有效范围内。`;
+        resultsDivM2.textContent = `计算出错 (M2 v2.0): ${error.message}\n\n请检查输入参数是否在工质的有效范围内, 以及效率和T2a是否匹配。`;
         console.error("Mode 2 Error:", error);
         lastMode2ResultText = null;
         printButtonM2.disabled = true;
@@ -264,7 +278,7 @@ ${cooler_output}
 }
 
 /**
- * (v1.0 喷油版) 模式二 (制冷热泵) 打印报告
+ * (v2.0 喷油预测版) 模式二 (制冷热泵) 打印报告
  */
 function printReportMode2() {
     if (!lastMode2ResultText) {
@@ -273,7 +287,7 @@ function printReportMode2() {
     }
 
     const inputs = {
-        "报告类型": `模式二: 性能预测 (制冷热泵 - 喷油版)`,
+        "报告类型": `模式二: 性能估算 (制冷热泵 - 喷油版 v2.0)`,
         "工质": document.getElementById('fluid_m2').value,
         "理论输气量模式": document.querySelector('input[name="flow_mode_m2"]:checked').value === 'rpm' ? '按转速与排量' : '按体积流量',
         "转速 (RPM)": document.getElementById('rpm_m2').value,
@@ -287,8 +301,7 @@ function printReportMode2() {
         "等熵/总效率 (η_s / η_total)": document.getElementById('eta_s_m2').value,
         "容积效率 (η_v)": document.getElementById('eta_v_m2').value,
         "电机效率": document.getElementById('motor_eff_m2').value,
-        "计算后冷却器": document.getElementById('enable_cooler_calc_m2').checked ? '是' : '否',
-        "目标冷却后温度 (°C)": document.getElementById('target_temp_m2').value,
+        "预估的实际排气温度 T2a (°C)": document.getElementById('temp_discharge_actual_m2').value,
     };
     
     callPrint(inputs, lastMode2ResultText, "模式二");
@@ -346,7 +359,7 @@ function callPrint(inputs, resultText, modeTitle) {
 // =====================================================================
 
 /**
- * (v1.0 喷油版) 模式二：初始化函数
+ * (v2.0 喷油预测版) 模式二：初始化函数
  * @param {object} CP - CoolProp 实例
  */
 export function initMode2(CP) {
@@ -359,9 +372,9 @@ export function initMode2(CP) {
     printButtonM2 = document.getElementById('print-button-mode-2');
     fluidSelectM2 = document.getElementById('fluid_m2');
     fluidInfoDivM2 = document.getElementById('fluid-info-m2');
-    enableCoolerCalcM2 = document.getElementById('enable_cooler_calc_m2');
-    targetTempM2 = document.getElementById('target_temp_m2');
-
+    // v2.0: 绑定新输入
+    tempDischargeActualM2 = document.getElementById('temp_discharge_actual_m2');
+    
     if (calcFormM2) {
         allInputsM2 = calcFormM2.querySelectorAll('input, select');
         
@@ -395,7 +408,5 @@ export function initMode2(CP) {
         }
     }
     
-    // (v1.0 喷油版) 移除 2B 初始化
-    
-    console.log("模式二 (喷油制冷 v1.0) 已初始化。");
+    console.log("模式二 (喷油制冷 v2.0) 已初始化。");
 }
