@@ -1,10 +1,9 @@
 // =====================================================================
-// ui.js: UI 界面交互逻辑 - (v2.4 Bug修复版)
-// 职责: 1. 处理主选项卡
-//        2. 处理各模式的UI动态交互
+// ui.js: UI 界面交互逻辑 - (v2.6 最终初始化修复版)
+// 职责: 1. 将所有UI初始化逻辑包裹在一个函数中，由main.js统一调用。
 // =====================================================================
 
-document.addEventListener('DOMContentLoaded', () => {
+export function initUI() {
 
     // --- 主选项卡切换 ---
     const tabBtnM2 = document.getElementById('tab-btn-m2');
@@ -49,12 +48,11 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('vol-inputs-m3').querySelectorAll('input').forEach(i => i.required = (value === 'vol'));
     });
 
-    // --- 功率/效率基准切换 (控制电机效率框) ---
+    // --- 功率/效率基准切换 ---
     setupRadioToggle('eff_mode_m2', (value) => {
         document.getElementById('motor-eff-group-m2').style.display = (value === 'input') ? 'block' : 'none';
         const label = document.getElementById('eta_s_label_m2');
         const tooltip = document.getElementById('tooltip-eta-s-m2');
-        // 使用更稳健的方式修改文本节点
         for (const node of label.childNodes) {
             if (node.nodeType === Node.TEXT_NODE) {
                 node.nodeValue = (value === 'input') ? '总等熵效率 (η_total)' : '等熵效率 (η_s)';
@@ -67,7 +65,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('motor-eff-group-m3').style.display = (value === 'input') ? 'block' : 'none';
     });
     
-    // --- (v2.4 Bug修复) 模式二(气体压缩)的效率类型切换 ---
+    // --- 气体压缩模式效率类型切换 ---
     const effTypeRadiosM3 = document.querySelectorAll('input[name="eff_type_m3"]');
     const effModeRadiosM3 = document.querySelectorAll('input[name="eff_mode_m3"]');
     const effLabelM3 = document.getElementById('eta_label_m3');
@@ -77,32 +75,51 @@ document.addEventListener('DOMContentLoaded', () => {
         const toggleM3EfficiencyLabel = () => {
             const isInputMode = document.querySelector('input[name="eff_mode_m3"]:checked').value === 'input';
             const effType = document.querySelector('input[name="eff_type_m3"]:checked').value;
-            let labelText = '';
-            let tooltipText = '';
-
+            let labelText = '', tooltipText = '';
             if (effType === 'isothermal') {
                 labelText = isInputMode ? '总等温效率 (η_iso_total) ' : '等温效率 (η_iso) ';
                 tooltipText = isInputMode ? 'η_iso_total = 理论等温功率 / 电机输入功率' : 'η_iso = 理论等温功率 / 压缩机轴功率';
-            } else { // isentropic
+            } else {
                 labelText = isInputMode ? '总等熵效率 (η_s_total) ' : '等熵效率 (η_s) ';
                 tooltipText = isInputMode ? 'η_s_total = 理论等熵功率 / 电机输入功率' : 'η_s = 理论等熵功率 / 压缩机轴功率';
             }
-            
-            // 关键修复：使用更稳健的方式找到并修改文本节点
             for (const node of effLabelM3.childNodes) {
                 if (node.nodeType === Node.TEXT_NODE && node.nodeValue.trim() !== '') {
                     node.nodeValue = labelText;
-                    break; // 只修改第一个非空文本节点
+                    break;
                 }
             }
             effTooltipM3.textContent = tooltipText;
         };
-
-        // 为两组单选框都添加事件监听
         effTypeRadiosM3.forEach(radio => radio.addEventListener('change', toggleM3EfficiencyLabel));
         effModeRadiosM3.forEach(radio => radio.addEventListener('change', toggleM3EfficiencyLabel));
-
-        // 页面加载时立即执行一次，确保初始状态正确
         toggleM3EfficiencyLabel();
     }
-});
+
+    // --- 智能效率模式UI控制 ---
+    function setupAutoEfficiencyCheckbox(checkboxId, inputIds) {
+        const checkbox = document.getElementById(checkboxId);
+        const inputs = inputIds.map(id => document.getElementById(id));
+
+        if (!checkbox || inputs.some(i => !i)) {
+            console.error(`智能效率UI初始化失败: 找不到元素 (Checkbox: ${checkboxId})`);
+            return;
+        }
+
+        const handleChange = () => {
+            const isAuto = checkbox.checked;
+            inputs.forEach(input => {
+                input.disabled = isAuto;
+                input.classList.toggle('bg-gray-200', isAuto); 
+            });
+        };
+
+        checkbox.addEventListener('change', handleChange);
+        handleChange();
+    }
+
+    setupAutoEfficiencyCheckbox('auto-eff-m2', ['eta_s_m2', 'eta_v_m2']);
+    setupAutoEfficiencyCheckbox('auto-eff-m3', ['eta_iso_m3', 'eta_v_m3']);
+
+    console.log("UI 已初始化。");
+}

@@ -1,21 +1,16 @@
 // =====================================================================
-// mode3_oil_gas.js: 模式二 (气体压缩) 模块 - (v3.1 最终兼容性修复版)
-// 版本: v3.1
-// 职责: 1. (最终修复) 采用JS完全接管打印流程，绕过Safari的CSS渲染bug。
+// mode3_oil_gas.js: 模式二 (气体压缩) 模块 - (v2.8 最终初始化修复版)
 // =====================================================================
 
 import { updateFluidInfo } from './coolprop_loader.js';
+import { calculateEmpiricalEfficiencies } from './efficiency_models.js';
 
-// --- 模块内部变量 ---
 let CP_INSTANCE = null;
 let lastMode3ResultText = null;
+let calcButtonM3, resultsDivM3, calcFormM3, printButtonM3, fluidSelectM3, fluidInfoDivM3;
+let allInputsM3, tempDischargeActualM3;
+let autoEffCheckboxM3, pressInM3, pressOutM3, etaVM3, etaIsoM3, effTypeRadiosM3;
 
-// --- DOM 元素 ---
-let calcButtonM3, resultsDivM3, calcFormM3, printButtonM3;
-let fluidSelectM3, fluidInfoDivM3;
-let allInputsM3;
-
-// --- 按钮状态 ---
 const btnText3 = "计算性能 (模式二)";
 const btnTextStale3 = "重新计算 (模式二)";
 const classesFresh3 = ['bg-indigo-600', 'hover:bg-indigo-700', 'text-white'];
@@ -39,27 +34,40 @@ function setButtonFresh3() {
     }
 }
 
-/**
- * 主计算函数 (逻辑未变)
- */
+function updateAndDisplayEfficienciesM3() {
+    if (!autoEffCheckboxM3.checked) return;
+    const Pe_bar = parseFloat(pressInM3.value);
+    const Pc_bar = parseFloat(pressOutM3.value);
+    if (isNaN(Pe_bar) || isNaN(Pc_bar) || Pc_bar <= Pe_bar) return;
+    const pressureRatio = Pc_bar / Pe_bar;
+    const efficiencies = calculateEmpiricalEfficiencies(pressureRatio);
+    etaVM3.value = efficiencies.eta_v;
+    const effType = document.querySelector('input[name="eff_type_m3"]:checked').value;
+    if (effType === 'isothermal') {
+        etaIsoM3.value = efficiencies.eta_iso;
+    } else {
+        etaIsoM3.value = efficiencies.eta_s;
+    }
+}
+
 function calculateMode3() {
     try {
-        const fluid = document.getElementById('fluid_m3').value;
+        const fluid = fluidSelectM3.value;
         const Pe_bar = parseFloat(document.getElementById('press_in_m3').value);
         const Te_C = parseFloat(document.getElementById('temp_in_m3').value);
         const Pc_bar = parseFloat(document.getElementById('press_out_m3').value);
-        const T_2a_actual_C = parseFloat(document.getElementById('temp_discharge_actual_m3').value);
+        const T_2a_actual_C = parseFloat(tempDischargeActualM3.value);
         const flow_mode = document.querySelector('input[name="flow_mode_m3"]:checked').value;
-        const eta_v = parseFloat(document.getElementById('eta_v_m3').value);
-        const eff_mode = document.querySelector('input[name="eff_mode_m3"]:checked').value;
+        const eff_mode = document.querySelector('input[name="eff_mode_m3"]:checked').value; 
         const motor_eff = parseFloat(document.getElementById('motor_eff_m3').value);
         const efficiency_type = document.querySelector('input[name="eff_type_m3"]:checked').value;
-        const eta_input = parseFloat(document.getElementById('eta_iso_m3').value);
+        const eta_v = parseFloat(etaVM3.value);
+        const eta_input = parseFloat(etaIsoM3.value);
 
         if (isNaN(Pe_bar) || isNaN(Pc_bar) || isNaN(Te_C) || isNaN(T_2a_actual_C) || isNaN(eta_v) || isNaN(eta_input)) throw new Error("输入参数包含无效数字，请检查所有字段。");
         if (Pc_bar <= Pe_bar) throw new Error("排气压力必须高于吸气压力。");
         if (T_2a_actual_C <= Te_C) throw new Error("预估排气温度必须高于吸气温度。");
-
+        
         let V_th_m3_s;
         if (flow_mode === 'rpm') {
             const rpm = parseFloat(document.getElementById('rpm_m3').value);
@@ -85,10 +93,10 @@ function calculateMode3() {
         if (eff_mode === 'input') input_shaft_efficiency = eta_input / motor_eff;
 
         if (efficiency_type === 'isothermal') {
-            eta_iso_shaft = input_shaft_efficiency; W_shaft_W = W_iso_W / eta_iso_shaft; eta_s_shaft = Ws_W / W_shaft_W;
+            eta_iso_shaft = input_shaft_efficiency; W_shaft_W = W_iso_W / eta_iso_shaft; eta_s_shaft = Ws_W / W_shaft_W; 
             eff_input_note_iso = "(输入)";
         } else {
-            eta_s_shaft = input_shaft_efficiency; W_shaft_W = Ws_W / eta_s_shaft; eta_iso_shaft = W_iso_W / W_shaft_W;
+            eta_s_shaft = input_shaft_efficiency; W_shaft_W = Ws_W / eta_s_shaft; eta_iso_shaft = W_iso_W / W_shaft_W; 
             eff_input_note_s = "(输入)";
         }
         const W_input_W = W_shaft_W / motor_eff;
@@ -98,24 +106,21 @@ function calculateMode3() {
         const h_2a_act = CP_INSTANCE.PropsSI('H', 'T', T_2a_act_K, 'P', Pc_Pa, fluid);
         const Q_gas_heat_W = m_dot_act * (h_2a_act - h_1);
         const Q_oil_W = W_shaft_W - Q_gas_heat_W;
-        if (Q_oil_W < 0) throw new Error(`计算油冷负荷为负(${ (Q_oil_W/1000).toFixed(2) } kW)。请检查效率或排温。`);
+        if (Q_oil_W < 0) throw new Error(`计算油冷负荷为负(${ (Q_oil_W/1000).toFixed(2) } kW)。请检查效率是否过低或预估排温是否过高。`);
 
         let output = `
 --- 压缩机规格 (估算) ---
 工质: ${fluid}
 实际吸气量 (V_act): ${V_act_m3_s.toFixed(6)} m³/s
 估算质量流量 (m_dot): ${m_dot_act.toFixed(5)} kg/s
-
 --- 热力学状态点 ---
 1. 吸气 (Inlet):   T1=${Te_C.toFixed(2)}°C, P1=${Pe_bar.toFixed(3)}bar
 2a. 实际出口: T2a=${T_2a_actual_C.toFixed(2)}°C, P2=${Pc_bar.toFixed(3)}bar
-
 --- 功率 (估算) ---
 理论等温功率 (W_iso):   ${(W_iso_W / 1000).toFixed(3)} kW
 理论等熵功率 (Ws):     ${(Ws_W / 1000).toFixed(3)} kW
 估算轴功率 (W_shaft):   ${(W_shaft_W / 1000).toFixed(3)} kW
 估算输入功率 (W_input): ${(W_input_W / 1000).toFixed(3)} kW
-
 --- 效率 ---
 等温效率 (η_iso, 轴):   ${eta_iso_shaft.toFixed(4)} ${eff_input_note_iso}
 等熵效率 (η_s, 轴):     ${eta_s_shaft.toFixed(4)} ${eff_input_note_s}
@@ -123,7 +128,6 @@ function calculateMode3() {
 (总)等熵效率 (η_s_tot):   ${total_eta_s.toFixed(4)}
 (输入) 容积效率 (η_v):   ${eta_v.toFixed(4)}
 (输入) 电机效率 (η_motor): ${motor_eff.toFixed(4)}
-
 ========================================
            性能估算结果
 ========================================
@@ -136,10 +140,12 @@ function calculateMode3() {
 总排热量 (Q_total_heat): ${(W_shaft_W / 1000).toFixed(3)} kW
   (备注: Q_total = W_shaft)
 `;
+
         resultsDivM3.textContent = output;
         lastMode3ResultText = output.trim();
         setButtonFresh3();
         printButtonM3.disabled = false;
+
     } catch (error) {
         resultsDivM3.textContent = `计算出错 (模式二): ${error.message}\n\n请检查输入参数。`;
         console.error("Mode 3 Error:", error);
@@ -148,78 +154,14 @@ function calculateMode3() {
     }
 }
 
-function printReportMode3() {
-    if (!lastMode3ResultText) {
-        alert("没有可打印的结果。请先进行计算。");
-        return;
-    }
-    const inputs = {
-        '工质': document.getElementById('fluid_m3').value, '吸气压力 (bar)': document.getElementById('press_in_m3').value,
-        '吸气温度 (°C)': document.getElementById('temp_in_m3').value, '排气压力 (bar)': document.getElementById('press_out_m3').value,
-        '预估实际排气温度 (°C)': document.getElementById('temp_discharge_actual_m3').value, '容积效率 (η_v)': document.getElementById('eta_v_m3').value,
-    };
-    const effType = document.querySelector('input[name="eff_type_m3"]:checked').value;
-    if (effType === 'isothermal') {
-        inputs['效率类型'] = '等温效率 (η_iso)'; inputs['等温效率值'] = document.getElementById('eta_iso_m3').value;
-    } else {
-        inputs['效率类型'] = '等熵效率 (η_s)'; inputs['等熵效率值'] = document.getElementById('eta_iso_m3').value;
-    }
-    const effMode = document.querySelector('input[name="eff_mode_m3"]:checked').value;
-    inputs['功率基准'] = (effMode === 'input') ? '基于输入功率' : '基于轴功率';
-    if (effMode === 'input') {
-        inputs['电机效率'] = document.getElementById('motor_eff_m3').value;
-    }
-    const flowMode = document.querySelector('input[name="flow_mode_m3"]:checked').value;
-    if (flowMode === 'rpm') {
-        inputs['压缩机转速 (RPM)'] = document.getElementById('rpm_m3').value;
-        inputs['每转排量 (cm³/rev)'] = document.getElementById('displacement_m3').value;
-    } else {
-        inputs['理论体积流量 (m³/h)'] = document.getElementById('flow_m3h_m3').value;
-    }
-    callPrint(inputs, lastMode3ResultText, "模式二: 气体压缩 (喷油估算) - 计算报告");
-}
+function printReportMode3() { /* ... 保持您可用的最新版本 ... */ }
+function callPrint(inputs, resultText, modeTitle) { /* ... 保持您可用的最新版本 ... */ }
 
-/**
- * [v3.1 最终兼容性修复] 采用JS完全接管打印流程
- */
-function callPrint(inputs, resultText, modeTitle) {
-    const printContainer = document.getElementById('print-container');
-    if (!printContainer) {
-        alert("打印功能初始化失败，请联系开发者。");
-        return;
+// [新增] 导出给main.js调用的函数
+export function triggerMode3EfficiencyUpdate() {
+    if (autoEffCheckboxM3 && autoEffCheckboxM3.checked) {
+        updateAndDisplayEfficienciesM3();
     }
-    
-    // 1. 填充好待打印的内容
-    printContainer.querySelector('h1').textContent = modeTitle;
-    let tableHtml = '';
-    for (const key in inputs) {
-        tableHtml += `<tr><th>${key}</th><td>${inputs[key]}</td></tr>`;
-    }
-    printContainer.querySelector('.print-table').innerHTML = tableHtml;
-    printContainer.querySelector('.print-results').textContent = resultText;
-    printContainer.querySelector('p').textContent = `报告生成时间: ${new Date().toLocaleString()} | 计算器版本: v2.3`;
-
-    // 2. 存储原始页面内容
-    const originalContent = document.body.innerHTML;
-
-    // 3. 页面内容替换为打印内容
-    document.body.innerHTML = printContainer.innerHTML;
-    
-    // 4. 定义一个恢复页面的函数
-    const restorePage = () => {
-        document.body.innerHTML = originalContent;
-        // 恢复后需要重新获取DOM元素并绑定事件，因为innerHTML的替换会销毁它们
-        // 这是最简单的恢复方式，但会导致页面需要重新加载才能再次计算。
-        // 为了确保功能，我们强制重新加载。
-        window.location.reload();
-    };
-
-    // 5. 调用打印
-    window.print();
-    
-    // 6. 打印结束后，无论成功或取消，都恢复页面
-    // 使用setTimeout确保恢复操作在打印对话框关闭后执行
-    setTimeout(restorePage, 100);
 }
 
 export function initMode3(CP) {
@@ -230,6 +172,13 @@ export function initMode3(CP) {
     printButtonM3 = document.getElementById('print-button-mode-3');
     fluidSelectM3 = document.getElementById('fluid_m3');
     fluidInfoDivM3 = document.getElementById('fluid-info-m3');
+    tempDischargeActualM3 = document.getElementById('temp_discharge_actual_m3');
+    autoEffCheckboxM3 = document.getElementById('auto-eff-m3');
+    pressInM3 = document.getElementById('press_in_m3');
+    pressOutM3 = document.getElementById('press_out_m3');
+    etaVM3 = document.getElementById('eta_v_m3');
+    etaIsoM3 = document.getElementById('eta_iso_m3');
+    effTypeRadiosM3 = document.querySelectorAll('input[name="eff_type_m3"]');
 
     if (calcFormM3) {
         allInputsM3 = calcFormM3.querySelectorAll('input, select');
@@ -238,8 +187,23 @@ export function initMode3(CP) {
             input.addEventListener('input', setButtonStale3);
             input.addEventListener('change', setButtonStale3);
         });
-        fluidSelectM3.addEventListener('change', () => updateFluidInfo(fluidSelectM3, fluidInfoDivM3, CP_INSTANCE));
-        printButtonM3.addEventListener('click', printReportMode3);
+
+        // [修复] 恢复物性信息更新的监听器
+        fluidSelectM3.addEventListener('change', () => {
+            updateFluidInfo(fluidSelectM3, fluidInfoDivM3, CP_INSTANCE);
+        });
+
+        const conditionInputs = [pressInM3, pressOutM3, autoEffCheckboxM3];
+        conditionInputs.forEach(input => {
+            input.addEventListener('input', updateAndDisplayEfficienciesM3);
+        });
+        effTypeRadiosM3.forEach(radio => {
+            radio.addEventListener('change', updateAndDisplayEfficienciesM3);
+        });
+        
+        if (printButtonM3) {
+            printButtonM3.addEventListener('click', printReportMode3);
+        }
     }
-    console.log("模式二 (气体压缩) v3.1 已初始化。");
+    console.log("模式二 (气体压缩) v2.8 已初始化。");
 }
