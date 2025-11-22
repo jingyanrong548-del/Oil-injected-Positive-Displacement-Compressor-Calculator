@@ -6,7 +6,7 @@
     <title>喷油容积式压缩机计算器 v2.3 (逻辑增强版)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* CSS样式与之前保持一致 */
+        /* === 通用屏幕样式 === */
         .input-group { margin-bottom: 0.75rem; }
         input[type="radio"] { margin-top: -0.1rem; }
         button:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -18,34 +18,91 @@
         .tab-content { display: none; border: 2px solid #d1d5db; border-radius: 0 6px 6px 6px; background-color: #ffffff; }
         .tab-content.active { display: block; }
         
-        /* [v3.0 Safari兼容性最终修复] */
+        /* === [v3.2 Safari/Chrome 打印最终修复] === */
         @media print {
-            #main-content {
+            /* 1. 核心修复：使用 display: none 彻底移除网页主体，释放空间 */
+            #main-content, footer, .tab-button, nav, header {
                 display: none !important;
             }
-            #print-container {
-                display: block !important;
-            }
+
+            /* 2. 页面设置：重置背景和边距 */
             @page { size: A4; margin: 1.5cm; }
-            body { background-color: #fff; color: #000; font-size: 10pt; font-family: 'Times New Roman', serif; }
-            h1, h2, h3 { color: #000 !important; border-bottom: 2px solid #000; padding-bottom: 4px; margin-top: 1.5rem; page-break-after: avoid; }
-            
-            /* [v3.0 Safari Fix] 强制移除第一个元素的顶部外边距，防止外边距折叠导致内容被截断 */
-            #print-container > *:first-child {
-                margin-top: 0 !important;
+            html, body {
+                background-color: #fff !important;
+                width: 100%;
+                height: auto;
+                margin: 0;
+                padding: 0;
+                overflow: visible !important; /* 允许内容流出 */
             }
 
-            h1 { font-size: 18pt; margin-bottom: 1rem; } h2 { font-size: 14pt; margin-bottom: 0.5rem; } h3 { font-size: 12pt; }
-            .print-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 10pt; }
-            .print-table th, .print-table td { border: 1px solid #000; padding: 6px 8px; text-align: left; }
-            .print-table th { background-color: #f0f0f0; font-weight: bold; width: 40%; }
-            .print-table td { width: 60%; }
-            pre.print-results { white-space: pre-wrap; word-wrap: break-word; font-family: 'Courier New', monospace; font-size: 9.5pt; background-color: #f9f9f9; border: 1px solid #ccc; padding: 10px; margin-top: 10px; page-break-inside: avoid; }
+            /* 3. 打印容器设置：回归正常文档流 (static)，不使用 absolute */
+            #print-container {
+                display: block !important;
+                visibility: visible !important;
+                position: static !important; /* 关键：让浏览器自动排版 */
+                width: 100% !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                font-family: 'Times New Roman', serif;
+                color: #000;
+                font-size: 11pt;
+            }
+
+            /* 4. 确保内部元素可见 */
+            #print-container * {
+                visibility: visible !important;
+            }
+
+            /* 5. 样式美化 */
+            h1 { font-size: 18pt; font-weight: bold; text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 20px; color: #000 !important; }
+            h2 { font-size: 14pt; font-weight: bold; margin-top: 20px; margin-bottom: 10px; border-left: 5px solid #666; padding-left: 10px; color: #000 !important; page-break-after: avoid; }
+            
+            .print-table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 20px;
+                font-size: 10pt;
+            }
+            .print-table th, .print-table td {
+                border: 1px solid #000 !important; /* 强制黑色边框 */
+                padding: 6px 8px;
+                text-align: left;
+            }
+            .print-table th {
+                background-color: #f0f0f0 !important;
+                font-weight: bold;
+                width: 35%;
+                -webkit-print-color-adjust: exact; /* 强制打印背景色 */
+                print-color-adjust: exact;
+            }
+
+            pre.print-results {
+                font-family: 'Courier New', monospace;
+                font-size: 10pt;
+                white-space: pre-wrap;
+                word-wrap: break-word;
+                border: 1px solid #666;
+                padding: 10px;
+                margin-top: 10px;
+                background: none !important;
+                color: #000 !important;
+            }
+
+            .print-footer {
+                margin-top: 40px;
+                text-align: center;
+                font-size: 9pt;
+                color: #666;
+                border-top: 1px solid #ccc;
+                padding-top: 10px;
+            }
         }
     </style>
 </head>
 <body class="bg-gray-100 font-sans antialiased">
 
+    <!-- 网页主体内容 -->
     <div id="main-content" class="container mx-auto p-4 sm:p-8 max-w-3xl">
         <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">喷油容积式压缩机计算器 v2.3 (逻辑增强版)</h1>
         
@@ -140,14 +197,14 @@
         </div>
     </div>
 
-    <!-- [v3.0 Print Fix] 预置的、隐藏的打印容器 -->
+    <!-- [v3.2 Print Fix] 预置的、隐藏的打印容器 -->
     <div id="print-container" style="display: none;">
         <h1></h1>
         <h2>1. 输入参数</h2>
         <table class="print-table"></table>
         <h2>2. 计算结果</h2>
         <pre class="print-results"></pre>
-        <p style="text-align: center; font-size: 8pt; margin-top: 2rem; color: #666;"></p>
+        <p class="print-footer"></p>
     </div>
 
     <footer class="text-center text-gray-600 text-sm mt-8 pb-4 max-w-3xl mx-auto px-4">

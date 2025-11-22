@@ -1,5 +1,5 @@
 // =====================================================================
-// mode3_oil_gas.js: 模式二 (气体压缩) 模块 - (v2.8 最终初始化修复版)
+// mode3_oil_gas.js: 模式二 (气体压缩) 模块 - (v3.0 修复打印功能)
 // =====================================================================
 
 import { updateFluidInfo } from './coolprop_loader.js';
@@ -111,6 +111,7 @@ function calculateMode3() {
         let output = `
 --- 压缩机规格 (估算) ---
 工质: ${fluid}
+进出口压力 (Pressures): Pin = ${Pe_bar.toFixed(3)} bar (a), Pout = ${Pc_bar.toFixed(3)} bar (a)
 实际吸气量 (V_act): ${V_act_m3_s.toFixed(6)} m³/s
 估算质量流量 (m_dot): ${m_dot_act.toFixed(5)} kg/s
 --- 热力学状态点 ---
@@ -154,10 +155,70 @@ function calculateMode3() {
     }
 }
 
-function printReportMode3() { /* ... 保持您可用的最新版本 ... */ }
-function callPrint(inputs, resultText, modeTitle) { /* ... 保持您可用的最新版本 ... */ }
+// [新增] 实际的打印逻辑实现
+function printReportMode3() {
+    if (!lastMode3ResultText) {
+        alert("请先计算结果再打印。");
+        return;
+    }
 
-// [新增] 导出给main.js调用的函数
+    const flowMode = document.querySelector('input[name="flow_mode_m3"]:checked').value;
+    let flowInfo = "";
+    if (flowMode === 'rpm') {
+        flowInfo = `转速: ${document.getElementById('rpm_m3').value} RPM, 排量: ${document.getElementById('displacement_m3').value} cm³/rev`;
+    } else {
+        flowInfo = `理论流量: ${document.getElementById('flow_m3h_m3').value} m³/h`;
+    }
+
+    const effType = document.querySelector('input[name="eff_type_m3"]:checked').value;
+    const effMode = document.querySelector('input[name="eff_mode_m3"]:checked').value;
+    let effLabel = "";
+    if (effType === 'isothermal') effLabel = "等温效率 (η_iso)";
+    else effLabel = "等熵效率 (η_s)";
+    if (effMode === 'input') effLabel = "总" + effLabel;
+
+    const inputs = [
+        { label: "计算模式", value: "模式二: 气体压缩" },
+        { label: "工质", value: fluidSelectM3.value },
+        { label: "流量输入", value: flowInfo },
+        { label: "吸气压力 (Pin)", value: `${pressInM3.value} bar` },
+        { label: "吸气温度 (Tin)", value: `${document.getElementById('temp_in_m3').value} °C` },
+        { label: "排气压力 (Pout)", value: `${pressOutM3.value} bar` },
+        { label: "预估排气温度 (T2a)", value: `${tempDischargeActualM3.value} °C` },
+        { label: effLabel, value: etaIsoM3.value },
+        { label: "容积效率 (η_v)", value: etaVM3.value }
+    ];
+
+    callPrint(inputs, lastMode3ResultText, "喷油容积式压缩机 - 计算报告 (气体模式)");
+}
+
+// [新增] 通用打印调用函数 (重复定义以确保模块独立性)
+function callPrint(inputs, resultText, modeTitle) {
+    const container = document.getElementById('print-container');
+    if (!container) {
+        console.error("Print container not found!");
+        return;
+    }
+
+    const h1 = container.querySelector('h1');
+    if(h1) h1.textContent = modeTitle;
+
+    const table = container.querySelector('.print-table');
+    if (table) {
+        table.innerHTML = inputs.map(item => 
+            `<tr><th>${item.label}</th><td>${item.value}</td></tr>`
+        ).join('');
+    }
+
+    const pre = container.querySelector('.print-results');
+    if(pre) pre.textContent = resultText;
+
+    const footerP = container.querySelector('p:last-child');
+    if(footerP) footerP.textContent = `生成时间: ${new Date().toLocaleString()}`;
+
+    window.print();
+}
+
 export function triggerMode3EfficiencyUpdate() {
     if (autoEffCheckboxM3 && autoEffCheckboxM3.checked) {
         updateAndDisplayEfficienciesM3();
@@ -188,7 +249,6 @@ export function initMode3(CP) {
             input.addEventListener('change', setButtonStale3);
         });
 
-        // [修复] 恢复物性信息更新的监听器
         fluidSelectM3.addEventListener('change', () => {
             updateFluidInfo(fluidSelectM3, fluidInfoDivM3, CP_INSTANCE);
         });
@@ -205,5 +265,5 @@ export function initMode3(CP) {
             printButtonM3.addEventListener('click', printReportMode3);
         }
     }
-    console.log("模式二 (气体压缩) v2.8 已初始化。");
+    console.log("模式二 (气体压缩) v3.0 已初始化 (含打印修复)。");
 }

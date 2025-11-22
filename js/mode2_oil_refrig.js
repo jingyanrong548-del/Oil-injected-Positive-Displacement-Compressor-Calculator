@@ -1,5 +1,5 @@
 // =====================================================================
-// mode2_oil_refrig.js: 模式一 (制冷热泵) 模块 - (v2.8 最终初始化修复版)
+// mode2_oil_refrig.js: 模式一 (制冷热泵) 模块 - (v3.0 修复打印功能)
 // =====================================================================
 
 import { updateFluidInfo } from './coolprop_loader.js';
@@ -122,6 +122,7 @@ function calculateMode2() {
         let output = `
 --- 压缩机规格 (估算) ---
 工质: ${fluid}
+进出口压力 (Pressures): Pin = ${(Pe_Pa / 1e5).toFixed(3)} bar (a), Pout = ${(Pc_Pa / 1e5).toFixed(3)} bar (a)
 理论输气量 (V_th): ${V_th_m3_s.toFixed(6)} m³/s (${(V_th_m3_s * 3600).toFixed(3)} m³/h)
   (来源: ${flow_input_source})
 实际吸气量 (V_act): ${V_act_m3_s.toFixed(6)} m³/s (V_th * η_v)
@@ -171,10 +172,73 @@ COP (总热回收, COP_H_total): ${COP_H_total.toFixed(3)}
     }
 }
 
-function printReportMode2() { /* ... 保持您可用的最新版本 ... */ }
-function callPrint(inputs, resultText, modeTitle) { /* ... 保持您可用的最新版本 ... */ }
+// [新增] 实际的打印逻辑实现
+function printReportMode2() {
+    if (!lastMode2ResultText) {
+        alert("请先计算结果再打印。");
+        return;
+    }
 
-// [新增] 导出给main.js调用的函数
+    const flowMode = document.querySelector('input[name="flow_mode_m2"]:checked').value;
+    let flowInfo = "";
+    if (flowMode === 'rpm') {
+        flowInfo = `转速: ${document.getElementById('rpm_m2').value} RPM, 排量: ${document.getElementById('displacement_m2').value} cm³/rev`;
+    } else {
+        flowInfo = `理论流量: ${document.getElementById('flow_m3h_m2').value} m³/h`;
+    }
+
+    const effMode = document.querySelector('input[name="eff_mode_m2"]:checked').value;
+    const effLabel = effMode === 'shaft' ? '等熵效率 (η_s, 轴)' : '总等熵效率 (η_total)';
+
+    const inputs = [
+        { label: "计算模式", value: "模式一: 制冷热泵" },
+        { label: "工质", value: fluidSelectM2.value },
+        { label: "流量输入", value: flowInfo },
+        { label: "蒸发温度 (Te)", value: `${tempEvapM2.value} °C` },
+        { label: "冷凝温度 (Tc)", value: `${tempCondM2.value} °C` },
+        { label: "过热度", value: `${document.getElementById('superheat_m2').value} K` },
+        { label: "过冷度", value: `${document.getElementById('subcooling_m2').value} K` },
+        { label: "预估排气温度 (T2a)", value: `${tempDischargeActualM2.value} °C` },
+        { label: effLabel, value: etaSM2.value },
+        { label: "容积效率 (η_v)", value: etaVM2.value },
+        { label: "电机效率", value: document.getElementById('motor_eff_m2').value }
+    ];
+
+    callPrint(inputs, lastMode2ResultText, "喷油容积式压缩机 - 计算报告 (制冷模式)");
+}
+
+// [新增] 通用打印调用函数
+function callPrint(inputs, resultText, modeTitle) {
+    const container = document.getElementById('print-container');
+    if (!container) {
+        console.error("Print container not found!");
+        return;
+    }
+
+    // 1. 设置标题
+    const h1 = container.querySelector('h1');
+    if(h1) h1.textContent = modeTitle;
+
+    // 2. 构建输入参数表
+    const table = container.querySelector('.print-table');
+    if (table) {
+        table.innerHTML = inputs.map(item => 
+            `<tr><th>${item.label}</th><td>${item.value}</td></tr>`
+        ).join('');
+    }
+
+    // 3. 设置结果文本
+    const pre = container.querySelector('.print-results');
+    if(pre) pre.textContent = resultText;
+
+    // 4. 设置底部时间
+    const footerP = container.querySelector('p:last-child');
+    if(footerP) footerP.textContent = `生成时间: ${new Date().toLocaleString()}`;
+
+    // 5. 调用浏览器打印
+    window.print();
+}
+
 export function triggerMode2EfficiencyUpdate() {
     if (autoEffCheckboxM2 && autoEffCheckboxM2.checked) {
         updateAndDisplayEfficienciesM2();
@@ -204,7 +268,6 @@ export function initMode2(CP) {
             input.addEventListener('change', setButtonStale2);
         });
 
-        // [修复] 恢复物性信息更新的监听器
         fluidSelectM2.addEventListener('change', () => {
             updateFluidInfo(fluidSelectM2, fluidInfoDivM2, CP_INSTANCE);
         });
@@ -218,5 +281,5 @@ export function initMode2(CP) {
             printButtonM2.addEventListener('click', printReportMode2);
         }
     }
-    console.log("模式一 (制冷热泵) v2.8 已初始化。");
+    console.log("模式一 (制冷热泵) v3.0 已初始化 (含打印修复)。");
 }
