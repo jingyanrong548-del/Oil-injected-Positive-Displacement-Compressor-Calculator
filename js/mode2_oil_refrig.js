@@ -1,5 +1,5 @@
 // =====================================================================
-// mode2_oil_refrig.js: 模式一 (制冷热泵) 模块 - (v3.0 修复打印功能)
+// mode2_oil_refrig.js: 模式一 (制冷热泵) 模块 - (v3.1 能量平衡详解版)
 // =====================================================================
 
 import { updateFluidInfo } from './coolprop_loader.js';
@@ -117,7 +117,13 @@ function calculateMode2() {
         }
         
         const Q_evap_W = m_dot_act * (h_1 - h_4), Q_cond_W = m_dot_act * (h_2a_act - h_3), Q_total_heat_W = W_shaft_W + Q_evap_W;
+        
+        // 输入功率 COP (含电机损耗)
         const COP_R = Q_evap_W / W_input_W, COP_H_cond = Q_cond_W / W_input_W, COP_H_total = Q_total_heat_W / W_input_W;
+
+        // [新增] 轴功率 COP (理论循环，不含电机损耗，满足 COP_H = COP_R + 1)
+        const COP_R_shaft = Q_evap_W / W_shaft_W;
+        const COP_H_shaft = Q_total_heat_W / W_shaft_W;
         
         let output = `
 --- 压缩机规格 (估算) ---
@@ -153,10 +159,18 @@ ${eff_mode_desc}
 油冷负荷 (Q_oil_load): ${(Q_oil_W / 1000).toFixed(3)} kW${oil_note}
 ----------------------------------------
 总排热量 (Q_total_heat): ${(Q_total_heat_W / 1000).toFixed(3)} kW
+>> 能量平衡校验: Q_evap(${ (Q_evap_W/1000).toFixed(2) }) + W_shaft(${ (W_shaft_W/1000).toFixed(2) }) = ${ ((Q_evap_W+W_shaft_W)/1000).toFixed(3) } kW (等于总排热量)
+
 --- 性能系数 (COP) ---
-COP (制冷, COP_R):       ${COP_R.toFixed(3)}
-COP (制热, COP_H_cond):  ${COP_H_cond.toFixed(3)}
-COP (总热回收, COP_H_total): ${COP_H_total.toFixed(3)}
+A. 基于【输入功率】(含电机损耗):
+  COP (制冷):      ${COP_R.toFixed(3)}
+  COP (总热回收):  ${COP_H_total.toFixed(3)}
+  (关系: COP_H ≈ COP_R + 电机效率${motor_eff})
+
+B. 基于【轴功率】(纯热力学):
+  COP (制冷):      ${COP_R_shaft.toFixed(3)}
+  COP (总热回收):  ${COP_H_shaft.toFixed(3)}
+  (关系: COP_H = COP_R + 1.000)
 `;
         
         resultsDivM2.textContent = output;
@@ -172,7 +186,6 @@ COP (总热回收, COP_H_total): ${COP_H_total.toFixed(3)}
     }
 }
 
-// [新增] 实际的打印逻辑实现
 function printReportMode2() {
     if (!lastMode2ResultText) {
         alert("请先计算结果再打印。");
@@ -207,35 +220,24 @@ function printReportMode2() {
     callPrint(inputs, lastMode2ResultText, "喷油容积式压缩机 - 计算报告 (制冷模式)");
 }
 
-// [新增] 通用打印调用函数
 function callPrint(inputs, resultText, modeTitle) {
     const container = document.getElementById('print-container');
     if (!container) {
         console.error("Print container not found!");
         return;
     }
-
-    // 1. 设置标题
     const h1 = container.querySelector('h1');
     if(h1) h1.textContent = modeTitle;
-
-    // 2. 构建输入参数表
     const table = container.querySelector('.print-table');
     if (table) {
         table.innerHTML = inputs.map(item => 
             `<tr><th>${item.label}</th><td>${item.value}</td></tr>`
         ).join('');
     }
-
-    // 3. 设置结果文本
     const pre = container.querySelector('.print-results');
     if(pre) pre.textContent = resultText;
-
-    // 4. 设置底部时间
     const footerP = container.querySelector('p:last-child');
     if(footerP) footerP.textContent = `生成时间: ${new Date().toLocaleString()}`;
-
-    // 5. 调用浏览器打印
     window.print();
 }
 
@@ -267,19 +269,16 @@ export function initMode2(CP) {
             input.addEventListener('input', setButtonStale2);
             input.addEventListener('change', setButtonStale2);
         });
-
         fluidSelectM2.addEventListener('change', () => {
             updateFluidInfo(fluidSelectM2, fluidInfoDivM2, CP_INSTANCE);
         });
-
         const conditionInputs = [tempEvapM2, tempCondM2, autoEffCheckboxM2];
         conditionInputs.forEach(input => {
             input.addEventListener('change', updateAndDisplayEfficienciesM2);
         });
-        
         if (printButtonM2) {
             printButtonM2.addEventListener('click', printReportMode2);
         }
     }
-    console.log("模式一 (制冷热泵) v3.0 已初始化 (含打印修复)。");
+    console.log("模式一 (制冷热泵) v3.1 已初始化 (含能量平衡详解)。");
 }
